@@ -5,6 +5,7 @@ function App() {
   return (
     <div className="App">
       <div>
+        <button id='back' onClick={()=>window.history.back()}>Назад</button>
         <h2>Счетчик:</h2>
         <h1>{count}</h1>
         <button className="minus" onClick={()=>setCount(count-1)}>- Минус</button>
