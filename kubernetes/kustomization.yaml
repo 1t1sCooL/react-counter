@@ -7,6 +7,6 @@ resources:
   - ingress.yaml
 
 images:
-  - name: myapp
-    newName: myapp
+  - name: react-counter-app
+    newName: react-counter-app
     newTag: latest
