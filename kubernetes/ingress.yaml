@@ -3,6 +3,7 @@ kind: Ingress
 metadata:
   name: react-counter
 spec:
+  ingressClassName: nginx
   rules:
     - host: mmalabugin.ru
       http:
