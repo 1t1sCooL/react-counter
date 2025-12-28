@@ -4,9 +4,10 @@ metadata:
   name: react-counter
   namespace: default
   annotations:
+    # Важно: это позволяет корректно проксировать статику в корень контейнера
     nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/ssl-redirect: "true" # если есть TLS
-    nginx.ingress.kubernetes.io/proxy-body-size: "10m" # пример лимита
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 spec:
   ingressClassName: nginx
   rules:
@@ -17,7 +18,8 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: myapp
+                # ИСПРАВЛЕНО: имя должно быть как в Service.yaml
+                name: react-counter
                 port:
                   number: 80
   tls:

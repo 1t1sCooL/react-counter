@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: react-counter
+  name: react-counter # Это имя должен использовать Ingress
   namespace: default
 spec:
   selector:
-    app: myapp
+    app: react-counter-app # Это должно совпадать с labels в Deployment
   ports:
     - port: 80
-      targetPort: 3000
+      targetPort: 80 # Порт внутри контейнера (Nginx)
   type: ClusterIP

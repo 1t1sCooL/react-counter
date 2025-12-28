@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: myapp
+  name: react-counter-app # Имя деплоймента
   namespace: default
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: myapp
+      app: react-counter-app
   template:
     metadata:
       labels:
-        app: myapp
+        app: react-counter-app
     spec:
       containers:
-        - name: myapp
-          image: myapp:latest # Будет заменено в Jenkins
+        - name: react-counter-app
+          image: react-counter-app:latest
           ports:
-            - containerPort: 3000
+            - containerPort: 80 # ИСПРАВЛЕНО: Стандарт для Nginx
           env:
             - name: NODE_ENV
               value: "production"
@@ -30,7 +30,7 @@ spec:
               cpu: "500m"
           livenessProbe:
             httpGet:
-              path: /health
-              port: 3000
-            initialDelaySeconds: 30
+              path: / # ИСПРАВЛЕНО: Проверяем доступность главной страницы
+              port: 80 # ИСПРАВЛЕНО: Должен совпадать с containerPort
+            initialDelaySeconds: 10 # Nginx стартует мгновенно, 30 сек ждать не обязательно
             periodSeconds: 10
