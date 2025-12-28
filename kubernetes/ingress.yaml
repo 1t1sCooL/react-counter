@@ -2,17 +2,25 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: react-counter
-  annotations: {}
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true" # если есть TLS
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m" # пример лимита
 spec:
   ingressClassName: nginx
   rules:
     - host: mmalabugin.ru
       http:
         paths:
-          - path: /react-counter
+          - path: /react-counter(/|$)(.*)
             pathType: Prefix
             backend:
               service:
-                name: react-counter
+                name: myapp
                 port:
                   number: 80
+  tls:
+    - hosts:
+        - mmalabugin.ru
+      secretName: react-counter-tls
