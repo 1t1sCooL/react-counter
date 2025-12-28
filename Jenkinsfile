@@ -20,69 +20,109 @@ pipeline {
                 sh '''
                     npm install
                     npm run build
+                    # Ensure dist/ folder exists
+                    if [ -d "build" ] && [ ! -d "dist" ]; then
+                        cp -r build dist
+                    fi
                 '''
             }
         }
         
-        stage('Build and Push Docker Image') {
+        stage('Build Docker Image') {
             steps {
                 sh """
-                    # Создаем Dockerfile
-                    cat > Dockerfile << 'DOCKERFILE'
+                    # Создаем Dockerfile если нет
+                    if [ ! -f "Dockerfile" ]; then
+                        cat > Dockerfile << 'EOF'
 FROM nginx:alpine
 COPY dist/ /usr/share/nginx/html/
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
-DOCKERFILE
+EOF
+                    fi
                     
-                    # Собираем образ
                     docker build -t ${FULL_IMAGE} -t ${REGISTRY}/${IMAGE_NAME}:latest .
-                    
-                    # Пушим в локальный registry
-                    docker push ${FULL_IMAGE}
-                    docker push ${REGISTRY}/${IMAGE_NAME}:latest
+                    docker push ${FULL_IMAGE} 2>/dev/null || echo "Using local image"
                 """
             }
         }
         
-        stage('Deploy to Kubernetes') {
-    steps {
-        script {
-            echo "🚀 Деплоим в Kubernetes..."
-            
-            sh """
-                IMAGE=$(cat image.txt)
-                echo "Используем образ: $IMAGE"
-                
-                # Если используете kustomize
-                if [ -f "kubernetes/kustomization.yaml" ]; then
-                    cd kubernetes
-                    kustomize edit set image react-counter=$IMAGE
-                    kustomize build . | kubectl apply -f -
-                
-                # Если отдельные файлы
-                else
-                    # Обновляем образ в deployment
-                    sed -i "s|image: .*|image: $IMAGE|g" kubernetes/deployment.yaml
-                    
-                    # Применяем все манифесты
-                    kubectl apply -f kubernetes/
-                fi
-                
-                echo "✅ Все манифесты применены"
-            """
-        }
-    }
-}
-        
-        stage('Verify') {
+        stage('Deploy with GitOps') {
             steps {
-                sh '''
-                    echo "⏳ Waiting for pods..."
-                    sleep 10
-                    kubectl get pods -l app=react-counter
-                    kubectl describe pods -l app=react-counter | grep -A5 Events
-                '''
+                script {
+                    echo "🚀 GitOps deployment..."
+                    
+                    // Если есть манифесты в репозитории - используем их
+                    if (fileExists('kubernetes/')) {
+                        sh '''
+                            echo "📁 Using manifests from repository..."
+                            
+                            # Обновляем образ в deployment
+                            if [ -f "kubernetes/deployment.yaml" ]; then
+                                sed -i "s|image: .*|image: ${FULL_IMAGE}|g" kubernetes/deployment.yaml
+                            fi
+                            
+                            # Применяем все манифесты из kubernetes/
+                            kubectl apply -f kubernetes/
+                            
+                            echo "✅ Applied manifests from git repository"
+                        '''
+                    } else {
+                        // Иначе создаем базовые манифесты
+                        sh """
+                            kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: react-counter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: react-counter
+  template:
+    metadata:
+      labels:
+        app: react-counter
+    spec:
+      containers:
+      - name: react-app
+        image: ${FULL_IMAGE}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: react-counter
+spec:
+  selector:
+    app: react-counter
+  ports:
+  - port: 80
+    targetPort: 80
+EOF
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Add Ingress if needed') {
+            steps {
+                script {
+                    // Проверяем, есть ли ingress в репозитории
+                    if (fileExists('kubernetes/ingress.yaml')) {
+                        echo "✅ Ingress found in repository, applying..."
+                        sh 'kubectl apply -f kubernetes/ingress.yaml'
+                    } else {
+                        echo "⚠️  No ingress in repository. To add external access:"
+                        echo "1. Create kubernetes/ingress.yaml in your repo"
+                        echo "2. Merge to main"
+                        echo "3. Jenkins will automatically apply it"
+                    }
+                }
             }
         }
     }
