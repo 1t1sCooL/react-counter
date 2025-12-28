@@ -63,7 +63,7 @@ EOF
                             fi
                             
                             # Применяем все манифесты из kubernetes/
-                            kubectl apply -f kubernetes/
+                            kubectl apply -k kubernetes/
                             
                             echo "✅ Applied manifests from git repository"
                         '''
