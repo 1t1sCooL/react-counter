@@ -46,43 +46,34 @@ DOCKERFILE
         }
         
         stage('Deploy to Kubernetes') {
-            steps {
-                sh """
-                    kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: react-counter
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: react-counter
-  template:
-    metadata:
-      labels:
-        app: react-counter
-    spec:
-      containers:
-      - name: react-app
-        image: ${FULL_IMAGE}
-        ports:
-        - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: react-counter
-spec:
-  selector:
-    app: react-counter
-  ports:
-  - port: 80
-    targetPort: 80
-EOF
-                """
-            }
+    steps {
+        script {
+            echo "🚀 Деплоим в Kubernetes..."
+            
+            sh """
+                IMAGE=$(cat image.txt)
+                echo "Используем образ: $IMAGE"
+                
+                # Если используете kustomize
+                if [ -f "kubernetes/kustomization.yaml" ]; then
+                    cd kubernetes
+                    kustomize edit set image react-counter=$IMAGE
+                    kustomize build . | kubectl apply -f -
+                
+                # Если отдельные файлы
+                else
+                    # Обновляем образ в deployment
+                    sed -i "s|image: .*|image: $IMAGE|g" kubernetes/deployment.yaml
+                    
+                    # Применяем все манифесты
+                    kubectl apply -f kubernetes/
+                fi
+                
+                echo "✅ Все манифесты применены"
+            """
         }
+    }
+}
         
         stage('Verify') {
             steps {
