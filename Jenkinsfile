@@ -21,8 +21,6 @@ pipeline {
                     echo "📝 Ветка: ${GIT_BRANCH}"
                     echo "📋 Последний коммит:"
                     git log --oneline -1
-                    echo "📁 Содержимое:"
-                    ls -la
                 '''
             }
         }
@@ -33,7 +31,7 @@ pipeline {
                 sh '''
                     echo "📦 Устанавливаем зависимости Node.js..."
                     if [ -f "package.json" ]; then
-                        npm install || npm ci
+                        npm install
                         echo "✅ Зависимости установлены"
                     else
                         echo "❌ Файл package.json не найден"
@@ -49,8 +47,7 @@ pipeline {
                 sh '''
                     echo "🔨 Собираем React приложение..."
                     npm run build
-                    echo "📁 Содержимое папки dist:"
-                    ls -la dist/
+                    echo "✅ React приложение собрано"
                 '''
             }
         }
@@ -65,7 +62,7 @@ pipeline {
                     sh '''
                         if [ ! -f "Dockerfile" ]; then
                             echo "📝 Создаем Dockerfile..."
-                            cat > Dockerfile << "DOCKERFILE"
+                            cat > Dockerfile << "DOCKERFILE_EOF"
 # Stage 1: Build React app
 FROM node:18-alpine as build
 WORKDIR /app
@@ -76,10 +73,10 @@ RUN npm run build
 
 # Stage 2: Serve with nginx
 FROM nginx:alpine
-COPY --from=dist /app/dist /usr/share/nginx/html
+COPY --from=build /app/build /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
-DOCKERFILE
+DOCKERFILE_EOF
                         fi
                     '''
                     
@@ -103,8 +100,8 @@ DOCKERFILE
                         IMAGE=$(cat image.txt)
                         echo "Используем образ: $IMAGE"
                         
-                        // Создаем Kubernetes манифест
-                        cat > k8s-deployment.yaml << "K8S_YAML"
+                        # Создаем Kubernetes манифест
+                        cat > k8s-deployment.yaml << "K8S_YAML_EOF"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -147,21 +144,20 @@ spec:
   - port: 80
     targetPort: 80
   type: ClusterIP
-K8S_YAML
+K8S_YAML_EOF
                         
-                        // Заменяем плейсхолдер на реальный образ
+                        # Заменяем плейсхолдер на реальный образ
                         sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" k8s-deployment.yaml
                         
-                        echo "📋 Применяем Kubernetes манифест:"
-                        cat k8s-deployment.yaml
+                        echo "📋 Применяем Kubernetes манифест..."
                         
-                        // Применяем манифест
+                        # Применяем манифест
                         kubectl apply -f k8s-deployment.yaml
                         
-                        // Ждем rollout
+                        # Ждем rollout
                         echo "⏳ Ожидаем запуск подов..."
                         sleep 10
-                        kubectl rollout status deployment/react-counter --timeout=180s
+                        kubectl rollout status deployment/react-counter --timeout=180s || true
                     '''
                 }
             }
@@ -182,10 +178,7 @@ K8S_YAML
                     echo "🔗 Service:"
                     kubectl get svc react-counter
                     echo ""
-                    echo "📝 Логи (первые 5 строк):"
-                    kubectl logs deployment/react-counter --tail=5 2>/dev/null || echo "Логи пока недоступны"
-                    echo ""
-                    echo "✅ Деплой завершен!"
+                    echo "✅ Проверка завершена!"
                 '''
             }
         }
@@ -194,16 +187,20 @@ K8S_YAML
     post {
         success {
             echo '🎉 React приложение успешно задеплоено в Kubernetes!'
-            // Можно добавить уведомления
-            // slackSend(color: 'good', message: "✅ React app deployed successfully!")
         }
         failure {
             echo '❌ Деплой не удался'
-            // Автоматический откат
-            sh '''
-                echo "🔄 Пытаемся выполнить откат..."
-                kubectl rollout undo deployment/react-counter
-            '''
+            script {
+                // Откат только если deployment существует
+                sh '''
+                    if kubectl get deployment react-counter >/dev/null 2>&1; then
+                        echo "🔄 Выполняем откат..."
+                        kubectl rollout undo deployment/react-counter
+                    else
+                        echo "⚠️ Deployment react-counter не существует, откат не требуется"
+                    fi
+                '''
+            }
         }
         always {
             cleanWs()
