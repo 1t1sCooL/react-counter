@@ -1,34 +1,14 @@
 pipeline {
     agent any
     
-    tools {
-        kubectl 'kubectl'
-    }
-    
     environment {
         // Настройки Docker
-        DOCKER_IMAGE = 'myapp'
+        DOCKER_IMAGE = 'react-counter'
         DOCKER_TAG = "${BUILD_NUMBER}"
-        
-        // Или используйте Docker Hub
-        // DOCKER_REGISTRY = 'docker.io/ваш-username'
-        // DOCKER_IMAGE = "${DOCKER_REGISTRY}/myapp"
         
         // Настройки Kubernetes
         K8S_NAMESPACE = 'default'
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
-    }
-    
-    triggers {
-        // Запуск при пуше в main ветку
-        pollSCM('H/5 * * * *')
-        // Или через GitHub/GitLab webhook
-    }
-    
-    options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 30, unit: 'MINUTES')
-        disableConcurrentBuilds()
     }
     
     stages {
@@ -39,205 +19,195 @@ pipeline {
                 sh '''
                     echo "📦 Репозиторий: ${GIT_URL}"
                     echo "📝 Ветка: ${GIT_BRANCH}"
-                    echo "📋 Коммит: $(git log --oneline -1)"
+                    echo "📋 Последний коммит:"
+                    git log --oneline -1
+                    echo "📁 Содержимое:"
+                    ls -la
                 '''
             }
         }
         
-        // Этап 2: Тестирование
-        stage('Test') {
+        // Этап 2: Установка зависимостей
+        stage('Install Dependencies') {
             steps {
-                script {
-                    // Пример тестов для Node.js
-                    if (fileExists('package.json')) {
-                        sh 'npm install'
-                        sh 'npm test'
-                    }
-                    // Пример для Python
-                    if (fileExists('requirements.txt')) {
-                        sh 'pip install -r requirements.txt'
-                        sh 'pytest'
-                    }
-                }
+                sh '''
+                    echo "📦 Устанавливаем зависимости Node.js..."
+                    if [ -f "package.json" ]; then
+                        npm install || npm ci
+                        echo "✅ Зависимости установлены"
+                    else
+                        echo "❌ Файл package.json не найден"
+                        exit 1
+                    fi
+                '''
             }
         }
         
-        // Этап 3: Сборка Docker образа
-        stage('Build Docker Image') {
-            when {
-                anyOf {
-                    expression { return fileExists('Dockerfile') }
-                    branch 'main'
-                }
+        // Этап 3: Сборка React приложения
+        stage('Build React App') {
+            steps {
+                sh '''
+                    echo "🔨 Собираем React приложение..."
+                    npm run build
+                    echo "📁 Содержимое папки build:"
+                    ls -la build/
+                '''
             }
+        }
+        
+        // Этап 4: Создание Docker образа
+        stage('Build Docker Image') {
             steps {
                 script {
-                    echo "🐳 Сборка Docker образа..."
+                    echo "🐳 Создаем Docker образ..."
                     
-                    // Собираем образ
+                    // Создаем Dockerfile если его нет
+                    sh '''
+                        if [ ! -f "Dockerfile" ]; then
+                            echo "📝 Создаем Dockerfile..."
+                            cat > Dockerfile << "DOCKERFILE"
+# Stage 1: Build React app
+FROM node:18-alpine as build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve with nginx
+FROM nginx:alpine
+COPY --from=build /app/build /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+DOCKERFILE
+                        fi
+                    '''
+                    
+                    // Собираем Docker образ
                     sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
                     sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
                     
-                    // Если используете Docker Hub или другой registry
-                    // withCredentials([usernamePassword(
-                    //     credentialsId: 'docker-hub',
-                    //     usernameVariable: 'DOCKER_USER',
-                    //     passwordVariable: 'DOCKER_PASS'
-                    // )]) {
-                    //     sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
-                    //     sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    //     sh "docker push ${DOCKER_IMAGE}:latest"
-                    // }
-                    
-                    // Сохраняем имя образа в файл
+                    // Сохраняем имя образа
                     writeFile file: 'image.txt', text: "${DOCKER_IMAGE}:${DOCKER_TAG}"
                 }
             }
         }
         
-        // Этап 4: Деплой в Kubernetes
+        // Этап 5: Деплой в Kubernetes
         stage('Deploy to Kubernetes') {
-            when {
-                branch 'main'
-            }
             steps {
                 script {
-                    echo "🚀 Начинаем деплой в Kubernetes..."
+                    echo "🚀 Деплоим в Kubernetes..."
                     
-                    // Обновляем образ в Kubernetes манифестах
                     sh '''
                         IMAGE=$(cat image.txt)
                         echo "Используем образ: $IMAGE"
                         
-                        # Вариант 1: Через kustomize (рекомендуется)
-                        if [ -f "kubernetes/kustomization.yaml" ]; then
-                            cd kubernetes
-                            kustomize edit set image myapp=$IMAGE
-                            kustomize build . | kubectl apply -f -
-                            
-                        # Вариант 2: Прямое обновление deployment
-                        elif [ -f "kubernetes/deployment.yaml" ]; then
-                            sed -i "s|image: .*|image: $IMAGE|g" kubernetes/deployment.yaml
-                            kubectl apply -f kubernetes/
-                            
-                        # Вариант 3: Через kubectl set image
-                        else
-                            kubectl set image deployment/myapp myapp=$IMAGE -n ${K8S_NAMESPACE} || \
-                            kubectl apply -f - <<EOF
+                        // Создаем Kubernetes манифест
+                        cat > k8s-deployment.yaml << "K8S_YAML"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: myapp
-  namespace: ${K8S_NAMESPACE}
+  name: react-counter
+  namespace: default
+  labels:
+    app: react-counter
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: myapp
+      app: react-counter
   template:
     metadata:
       labels:
-        app: myapp
+        app: react-counter
     spec:
       containers:
-      - name: myapp
-        image: $IMAGE
+      - name: react-app
+        image: IMAGE_PLACEHOLDER
         ports:
-        - containerPort: 3000
-EOF
-                        fi
-                    '''
-                    
-                    // Ждем rollout
-                    sh '''
-                        echo "⏳ Ожидаем rollout..."
-                        kubectl rollout status deployment/myapp -n ${K8S_NAMESPACE} --timeout=300s
-                        echo "✅ Rollout завершен успешно!"
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: react-counter
+  namespace: default
+spec:
+  selector:
+    app: react-counter
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+K8S_YAML
+                        
+                        // Заменяем плейсхолдер на реальный образ
+                        sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" k8s-deployment.yaml
+                        
+                        echo "📋 Применяем Kubernetes манифест:"
+                        cat k8s-deployment.yaml
+                        
+                        // Применяем манифест
+                        kubectl apply -f k8s-deployment.yaml
+                        
+                        // Ждем rollout
+                        echo "⏳ Ожидаем запуск подов..."
+                        sleep 10
+                        kubectl rollout status deployment/react-counter --timeout=180s
                     '''
                 }
             }
         }
         
-        // Этап 5: Проверка деплоя
+        // Этап 6: Проверка деплоя
         stage('Verify Deployment') {
             steps {
-                script {
+                sh '''
                     echo "🔍 Проверяем деплой..."
-                    
-                    sh '''
-                        # Проверяем поды
-                        echo "📊 Статус подов:"
-                        kubectl get pods -n ${K8S_NAMESPACE} -l app=myapp
-                        
-                        # Проверяем deployment
-                        echo "📈 Статус deployment:"
-                        kubectl get deployment myapp -n ${K8S_NAMESPACE}
-                        
-                        # Проверяем сервис
-                        echo "🔗 Статус сервиса:"
-                        kubectl get svc myapp -n ${K8S_NAMESPACE}
-                        
-                        # Проверяем логи (первые 5 строк)
-                        echo "📝 Логи приложения:"
-                        kubectl logs -n ${K8S_NAMESPACE} deployment/myapp --tail=5 2>/dev/null || echo "Логи пока недоступны"
-                        
-                        # Smoke test (если есть endpoint)
-                        # kubectl port-forward svc/myapp 8080:80 -n ${K8S_NAMESPACE} &
-                        # sleep 5
-                        # curl -f http://localhost:8080/health && echo "✅ Smoke test пройден" || echo "❌ Smoke test не пройден"
-                        # pkill -f "port-forward"
-                    '''
-                }
-            }
-        }
-        
-        // Этап 6: Создание Git tag (опционально)
-        stage('Create Git Tag') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    sh '''
-                        git config user.email "jenkins@ci"
-                        git config user.name "Jenkins"
-                        git tag -a "v${BUILD_NUMBER}" -m "Deployed build ${BUILD_NUMBER} to production"
-                        git push origin "v${BUILD_NUMBER}"
-                    '''
-                    echo "🏷️ Создан Git tag v${BUILD_NUMBER}"
-                }
+                    echo ""
+                    echo "📊 Deployment:"
+                    kubectl get deployment react-counter
+                    echo ""
+                    echo "🐳 Pods:"
+                    kubectl get pods -l app=react-counter
+                    echo ""
+                    echo "🔗 Service:"
+                    kubectl get svc react-counter
+                    echo ""
+                    echo "📝 Логи (первые 5 строк):"
+                    kubectl logs deployment/react-counter --tail=5 2>/dev/null || echo "Логи пока недоступны"
+                    echo ""
+                    echo "✅ Деплой завершен!"
+                '''
             }
         }
     }
     
     post {
         success {
-            echo '🎉 Деплой выполнен успешно!'
-            // Уведомления
-            // slackSend(color: 'good', message: "✅ Deployed ${env.JOB_NAME} #${env.BUILD_NUMBER}")
-            // emailext to: 'team@example.com', subject: 'Deployment Successful'
+            echo '🎉 React приложение успешно задеплоено в Kubernetes!'
+            // Можно добавить уведомления
+            // slackSend(color: 'good', message: "✅ React app deployed successfully!")
         }
         failure {
-            echo '❌ Деплой не удался!'
-            
+            echo '❌ Деплой не удался'
             // Автоматический откат
-            script {
+            sh '''
                 echo "🔄 Пытаемся выполнить откат..."
-                sh '''
-                    kubectl rollout undo deployment/myapp -n ${K8S_NAMESPACE}
-                    echo "Откат к предыдущей версии выполнен"
-                '''
-            }
-            
-            // Уведомления об ошибке
-            // slackSend(color: 'danger', message: "❌ Deployment failed for ${env.JOB_NAME} #${env.BUILD_NUMBER}")
+                kubectl rollout undo deployment/react-counter
+            '''
         }
         always {
-            cleanWs() // Очистка workspace
+            cleanWs()
             echo '🧹 Workspace очищен'
-            
-            // Сохраняем артефакты
-            archiveArtifacts artifacts: 'image.txt', fingerprint: true
         }
     }
 }
