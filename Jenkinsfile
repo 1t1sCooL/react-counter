@@ -43,7 +43,7 @@ pipeline {
                         sh "sed -i 's|image: .*|image: ${FULL_IMAGE}|g' kubernetes/deployment.yaml"
                     }
                     
-                    sh "kubectl apply -f kubernetes/"
+                    sh "kubectl apply -k kubernetes/"
                 }
             }
         }
