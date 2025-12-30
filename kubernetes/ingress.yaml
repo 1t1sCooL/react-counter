@@ -1,14 +1,3 @@
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: react-counter-stripprefix
-  namespace: default
-spec:
-  stripPrefix:
-    prefixes:
-      - /react-counter
-      - /react-counter/ # Добавили вариант со слэшем для надежности
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -16,17 +5,14 @@ metadata:
   namespace: default
   annotations:
     kubernetes.io/ingress.class: "traefik"
-    # Важен порядок! Сначала HTTPS, потом StripPrefix
-    traefik.ingress.kubernetes.io/router.middlewares: |
-      default-force-https@kubernetescrd,
-      default-react-counter-stripprefix@kubernetescrd
+    # Оставляем ТОЛЬКО https редирект для начала
 spec:
   rules:
     - host: mmalabugin.ru
       http:
         paths:
           - path: /react-counter
-            pathType: Prefix # Позволяет ловить и /react-counter, и /react-counter/assets/...
+            pathType: Prefix
             backend:
               service:
                 name: react-counter
