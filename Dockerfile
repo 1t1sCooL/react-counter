@@ -12,7 +12,7 @@ RUN npm run build
 
 # ---------- 2. Nginx ----------
 FROM nginx:alpine
-
+RUN mkdir -p /usr/share/nginx/html/react-counter
 # Удаляем дефолтный конфиг
 RUN rm /etc/nginx/conf.d/default.conf
 
@@ -20,7 +20,7 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Копируем билд React
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/dist /usr/share/nginx/html/react-counter/
 
 EXPOSE 80
 
