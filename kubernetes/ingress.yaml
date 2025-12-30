@@ -7,6 +7,7 @@ spec:
   stripPrefix:
     prefixes:
       - /react-counter
+      - /react-counter/ # Добавили вариант со слэшем для надежности
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -15,8 +16,7 @@ metadata:
   namespace: default
   annotations:
     kubernetes.io/ingress.class: "traefik"
-    # 1. Сначала заставляем перейти на HTTPS
-    # 2. Затем отрезаем префикс /react-counter, чтобы Nginx внутри пода его не видел
+    # Важен порядок! Сначала HTTPS, потом StripPrefix
     traefik.ingress.kubernetes.io/router.middlewares: |
       default-force-https@kubernetescrd,
       default-react-counter-stripprefix@kubernetescrd
@@ -26,7 +26,7 @@ spec:
       http:
         paths:
           - path: /react-counter
-            pathType: Prefix
+            pathType: Prefix # Позволяет ловить и /react-counter, и /react-counter/assets/...
             backend:
               service:
                 name: react-counter
