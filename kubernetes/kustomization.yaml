@@ -4,9 +4,9 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
-  - ingress.yaml
 
 images:
   - name: react-counter-app
     newName: react-counter-app
     newTag: latest
+
